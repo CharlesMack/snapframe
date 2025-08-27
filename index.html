@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SnapFrame - The Quick-Draw Web Camera</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        /* Modern, minimalist UI for a quick-draw experience */
+        body {
+            background: #1e1e1e;
+            color: #f0f0f0;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #camera-feed-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #camera-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: contrast(1.1) saturate(1.2);
+            transform: scale(1.05); /* Simulates a slightly zoomed-in, focused view */
+            transition: transform 0.2s ease, filter 0.2s ease;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            gap: 15px;
+        }
+
+        #shutter-button {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: #fff;
+            border: 8px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+            transition: all 0.1s ease-in-out;
+            position: relative;
+        }
+
+        #shutter-button:active {
+            transform: scale(0.9);
+            border-width: 4px;
+        }
+        
+        /* New style for video recording state */
+        #shutter-button.recording {
+            background-color: #ff4d4d;
+            border-color: rgba(255, 77, 77, 0.4);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 77, 77, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 77, 77, 0); }
+        }
+
+        #status-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none;
+            z-index: 10;
+            font-size: 1.1rem;
+        }
+
+        .flash-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 1);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s ease-out;
+        }
+
+        #recording-timer {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            color: #ff4d4d;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        /* New camera flip button */
+        #camera-flip-button {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+
+        #camera-flip-button:active {
+            transform: scale(0.9);
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            transition: background-color 0.2s;
+            cursor: pointer;
+        }
+
+        .toggle:before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #fff;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.2s;
+        }
+
+        input[type="checkbox"]:checked + .toggle {
+            background-color: #ff4d4d;
+        }
+
+        input[type="checkbox"]:checked + .toggle:before {
+            transform: translateX(20px);
+        }
+
+        input[type="checkbox"] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <div id="camera-feed-container">
+            <video id="camera-feed" playsinline autoplay muted></video>
+            <div id="status-message"></div>
+            <div id="flash-overlay" class="flash-overlay"></div>
+            <div id="recording-timer">00:00</div>
+        </div>
+        <div id="controls">
+            <button id="shutter-button" aria-label="Capture"></button>
+            <div class="toggle-container">
+                <label for="persist-rec-toggle">Persist Rec</label>
+                <input type="checkbox" id="persist-rec-toggle" />
+                <label for="persist-rec-toggle" class="toggle"></label>
+            </div>
+        </div>
+        <button id="camera-flip-button">🔄</button>
+    </div>
+    
+    <script>
+        const video = document.getElementById('camera-feed');
+        const shutterButton = document.getElementById('shutter-button');
+        const cameraFlipButton = document.getElementById('camera-flip-button');
+        const statusMessage = document.getElementById('status-message');
+        const flashOverlay = document.getElementById('flash-overlay');
+        const recordingTimer = document.getElementById('recording-timer');
+        const persistRecToggle = document.getElementById('persist-rec-toggle');
+        
+        let mediaRecorder;
+        let recordedChunks = [];
+        let timerInterval;
+        let startTime;
+        let isRecording = false;
+        let currentFacingMode = 'environment';
+        let currentStream = null;
+
+        let pressTimer;
+        const longPressThreshold = 500; // milliseconds for long press
+
+        // Show a temporary message
+        function showStatus(text) {
+            statusMessage.textContent = text;
+            statusMessage.style.opacity = 1;
+            setTimeout(() => {
+                statusMessage.style.opacity = 0;
+            }, 1000);
+        }
+
+        // SnapFrame Engine: Real-time visual processing (placeholder)
+        function applyEngineFilters() {
+            video.style.filter = `contrast(1.1) saturate(1.2)`;
+        }
+
+        // Start the camera feed with audio
+        async function startCamera(facingMode = 'environment') {
+            try {
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode }, audio: true });
+                currentStream = stream;
+                currentFacingMode = facingMode;
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    applyEngineFilters();
+                    showStatus("SnapFrame is ready.");
+                };
+            } catch (err) {
+                console.error("Error accessing the camera: ", err);
+                showStatus("Camera access denied.");
+            }
+        }
+        
+        // Camera flip functionality
+        function flipCamera() {
+            const newFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            startCamera(newFacingMode);
+        }
+
+        // Capture and download logic for a single photo
+        function captureAndDownload() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            
+            flashOverlay.style.opacity = 1;
+            setTimeout(() => {
+                flashOverlay.style.opacity = 0;
+            }, 150);
+
+            context.filter = window.getComputedStyle(video).filter;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageDataURL = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = `snapframe_shot_${Date.now()}.png`;
+            link.href = imageDataURL;
+            link.click();
+            
+            showStatus("Shot captured.");
+        }
+
+        // Video recording functions
+        function startRecording() {
+            if (isRecording) return;
+            isRecording = true;
+            shutterButton.classList.add('recording');
+            recordedChunks = [];
+            const stream = video.srcObject;
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `snapframe_clip_${Date.now()}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            };
+            mediaRecorder.start();
+            showStatus("Recording started.");
+            
+            startTime = Date.now();
+            recordingTimer.style.opacity = 1;
+            timerInterval = setInterval(updateTimer, 1000);
+        }
+
+        function stopRecording() {
+            if (!isRecording) return;
+            isRecording = false;
+            shutterButton.classList.remove('recording');
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            showStatus("Recording stopped. Downloading clip.");
+            clearInterval(timerInterval);
+            recordingTimer.style.opacity = 0;
+            recordingTimer.textContent = '00:00';
+        }
+
+        function updateTimer() {
+            const elapsedTime = Date.now() - startTime;
+            const totalSeconds = Math.floor(elapsedTime / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            const formattedTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            recordingTimer.textContent = formattedTime;
+        }
+
+        // Event listeners for quick tap vs. long press
+        shutterButton.addEventListener('mousedown', () => {
+            if (persistRecToggle.checked) {
+                // If in persistent mode, a click is a toggle.
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            } else {
+                // If in normal mode, handle long press for video, or quick tap for photo.
+                pressTimer = setTimeout(() => {
+                    startRecording();
+                }, longPressThreshold);
+            }
+        });
+
+        shutterButton.addEventListener('mouseup', () => {
+            if (persistRecToggle.checked) {
+                // In persistent mode, mouseup does nothing.
+                // Recording is toggled by mousedown/click.
+            } else {
+                // In normal mode, clear the timer and act based on recording status.
+                clearTimeout(pressTimer);
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    // If the timer was cleared before completion, it's a quick tap for a photo
+                    captureAndDownload();
+                }
+            }
+        });
+
+        // Handle touch events for mobile
+        shutterButton.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (persistRecToggle.checked) {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            } else {
+                pressTimer = setTimeout(() => {
+                    startRecording();
+                }, longPressThreshold);
+            }
+        });
+
+        shutterButton.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (!persistRecToggle.checked) {
+                clearTimeout(pressTimer);
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    // If the timer was cleared before completion, it's a quick tap for a photo
+                    captureAndDownload();
+                }
+            }
+        });
+        
+        cameraFlipButton.addEventListener('click', flipCamera);
+        cameraFlipButton.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            flipCamera();
+        });
+
+
+        // Start the app
+        startCamera();
+    </script>
+</body>
+</html>
